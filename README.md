@@ -86,9 +86,11 @@ is set, the proxy uses the first key the agent advertises.
 
 ## Build
 
+With make (Linux / macOS):
+
 ```sh
 make build                 # ./bin/ssh-agent-proxy
-make build-windows         # ./bin/ssh-agent-proxy.exe  (cross-compile from Linux/Mac)
+make build-windows         # ./bin/ssh-agent-proxy.exe  (cross-compile)
 make build-darwin          # ./bin/ssh-agent-proxy-darwin
 make build-all             # all three
 
@@ -96,8 +98,24 @@ make install               # install to ~/.local/bin (override BINDIR=…)
 make check                 # go vet + go test
 ```
 
-Pure Go, no CGo, no build-tag gymnastics. Requires Go 1.25+ (pinned
-in `go.mod`). Cross-compiles work from any host to any target.
+Without make (Windows or anywhere with just `go`):
+
+```powershell
+go build -o ssh-agent-proxy.exe .\cmd\ssh-agent-proxy
+# or, to install into %USERPROFILE%\go\bin:
+go install .\cmd\ssh-agent-proxy
+```
+
+```sh
+# Linux / macOS without make:
+go build -o ssh-agent-proxy ./cmd/ssh-agent-proxy
+# or:
+go install ./cmd/ssh-agent-proxy
+```
+
+Pure Go, no CGo, no MinGW, no build-tag gymnastics. Requires
+Go 1.25+ (pinned in `go.mod`). Cross-compiles work from any host
+to any target.
 
 ## Run it interactively
 
@@ -348,14 +366,14 @@ front of `/sign` and `/publickey`.
 
 | Path | What |
 |---|---|
-| `main.go` | Config loading, HTTP server, signal handling |
-| `source_agent.go` | Generic `AgentSource` + `agentBackedSigner` |
-| `source_agent_unix.go` | Unix socket dialer (linux / darwin / bsd) |
-| `source_agent_windows.go` | Windows named-pipe dialer (go-winio) |
+| `cmd/ssh-agent-proxy/main.go` | Config loading, HTTP server, signal handling |
+| `cmd/ssh-agent-proxy/source_agent.go` | Generic `AgentSource` + `agentBackedSigner` |
+| `cmd/ssh-agent-proxy/source_agent_unix.go` | Unix socket dialer (linux / darwin / bsd) |
+| `cmd/ssh-agent-proxy/source_agent_windows.go` | Windows named-pipe dialer (go-winio) |
+| `cmd/ssh-agent-proxy/service_windows.go` | Windows service install/uninstall + `svc.Run` handler |
+| `cmd/ssh-agent-proxy/service_other.go` | No-op stubs for non-Windows |
+| `cmd/ssh-agent-proxy/hardening_{linux,darwin,windows,other}.go` | Per-platform process hardening |
 | `sshsig/` | Pure-Go SSHSIG wire format + OpenSSH armor |
-| `service_windows.go` | Windows service install/uninstall + `svc.Run` handler |
-| `service_other.go` | No-op stubs for non-Windows |
-| `hardening_{linux,darwin,windows,other}.go` | Per-platform process hardening |
 | `scripts/ssh-agent-proxy-sign.sh` | Container-side `gpg.ssh.program` shim |
 | `contrib/systemd/ssh-agent-proxy.service` | systemd **user** unit |
 | `contrib/systemd/env.example` | `EnvironmentFile=` template |

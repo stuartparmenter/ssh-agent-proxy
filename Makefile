@@ -26,17 +26,17 @@ ENV_DEST  := $(CONFIG_DIR)/env
 .PHONY: build
 build: ## Build the ssh-agent-proxy binary for the host platform into ./bin/
 	@mkdir -p bin
-	go build -o bin/ssh-agent-proxy .
+	go build -o bin/ssh-agent-proxy ./cmd/ssh-agent-proxy
 
 .PHONY: build-windows
 build-windows: ## Cross-compile the Windows binary into ./bin/ssh-agent-proxy.exe
 	@mkdir -p bin
-	GOOS=windows GOARCH=amd64 go build -o bin/ssh-agent-proxy.exe .
+	GOOS=windows GOARCH=amd64 go build -o bin/ssh-agent-proxy.exe ./cmd/ssh-agent-proxy
 
 .PHONY: build-darwin
 build-darwin: ## Cross-compile the macOS (arm64) binary into ./bin/ssh-agent-proxy-darwin
 	@mkdir -p bin
-	GOOS=darwin GOARCH=arm64 go build -o bin/ssh-agent-proxy-darwin .
+	GOOS=darwin GOARCH=arm64 go build -o bin/ssh-agent-proxy-darwin ./cmd/ssh-agent-proxy
 
 .PHONY: build-all
 build-all: build build-windows build-darwin ## Cross-compile for Linux, Windows, and macOS

@@ -296,15 +296,16 @@ func startProxyStub(t *testing.T, signer ssh.Signer) (*httptest.Server, string) 
 	return srv, srv.URL + "/sign"
 }
 
-// locateScript returns the path to scripts/ssh-agent-proxy-sign.sh relative to this
-// test file, skipping the test if it cannot be found.
+// locateScript returns the path to scripts/ssh-agent-proxy-sign.sh
+// at the repo root, walking up from this test file's location at
+// cmd/ssh-agent-proxy/main_test.go.
 func locateScript(t *testing.T) string {
 	t.Helper()
 	_, testFile, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("runtime.Caller failed")
 	}
-	p := filepath.Join(filepath.Dir(testFile), "scripts", "ssh-agent-proxy-sign.sh")
+	p := filepath.Join(filepath.Dir(testFile), "..", "..", "scripts", "ssh-agent-proxy-sign.sh")
 	if _, err := os.Stat(p); err != nil {
 		t.Skipf("script missing: %v", err)
 	}
