@@ -12,11 +12,24 @@ EnvironmentFile=%h/.config/op-sign-proxy/env
 Restart=on-failure
 RestartSec=5s
 
+# --- Memory hardening ---------------------------------------------------
+# The process calls mlockall(MCL_CURRENT|MCL_FUTURE) at startup to keep
+# transient key material out of swap. This needs a large enough locked-
+# memory limit — "infinity" is fine for a single small Go binary.
+LimitMEMLOCK=infinity
+# Kill core dumps so key material can never land in a .core file. The
+# process also sets RLIMIT_CORE=0 and PR_SET_DUMPABLE=0 internally, but
+# declaring it here makes the intent explicit and covers the window
+# before the in-process hardening runs.
+LimitCORE=0
+
 # --- Sandboxing ---------------------------------------------------------
-# The proxy is stateless: it reads one env file (via EnvironmentFile, which
-# systemd loads for us *before* the service starts), talks to 1Password
-# over HTTPS once at startup, then serves a local HTTP listener. It never
-# writes to disk. These hardening options reflect that.
+# The proxy is stateless on disk: it reads one env file (via
+# EnvironmentFile, which systemd loads for us *before* the service
+# starts), talks to 1Password over HTTPS on every /sign and /publickey
+# request, and serves a local HTTP listener. It never writes to disk.
+# The private key is not cached in memory across requests. These
+# hardening options reflect that.
 NoNewPrivileges=true
 PrivateTmp=true
 PrivateDevices=true

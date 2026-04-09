@@ -1,34 +1,53 @@
 # op-sign-proxy
 
-A tiny localhost HTTP proxy that signs arbitrary bytes with an SSH private
-key fetched from [1Password](https://1password.com) at startup, implementing
-the [SSHSIG](https://github.com/openssh/openssh-portable/blob/master/PROTOCOL.sshsig)
+A tiny localhost HTTP proxy that signs arbitrary bytes with an SSH
+private key fetched from [1Password](https://1password.com) on **every
+request**, implementing the
+[SSHSIG](https://github.com/openssh/openssh-portable/blob/master/PROTOCOL.sshsig)
 wire format in pure Go.
 
-The intended use case: **sign git commits from inside a container without
-ever giving the container access to the private key**. The proxy runs on
-the host (or in your WSL2 distro), loads the key from a 1Password service
-account once, and exposes a loopback endpoint that the container calls
-through a small `gpg.ssh.program` shim.
+The intended use case: **sign git commits from inside a container
+without ever giving the container access to the private key**. The
+proxy runs on the host (or in your WSL2 distro), resolves the key from
+a 1Password service account every time it needs to sign, and exposes a
+loopback endpoint that the container calls through a small
+`gpg.ssh.program` shim.
 
 ```
           ┌──────────────────────┐           ┌────────────────────────────┐
           │   host / WSL2 side   │           │      container side        │
           │                      │           │                            │
  1Password│  op-sign-proxy       │  HTTP     │  git commit -S             │
- ─────────┼─ :7221 /sign         │◄──────────┼─ gpg.ssh.program =         │
- vault    │       /publickey     │           │     op-git-sign.sh         │
-          │                      │           │                            │
+ ─────────┤  :7221 /sign         │◄──────────┤  gpg.ssh.program =         │
+ vault    │       /publickey     │           │    op-git-sign.sh          │
+       ◄──┼─  (fetch per req)    │           │                            │
+          │       /ref           │           │                            │
           └──────────────────────┘           └────────────────────────────┘
 ```
 
-- **`/sign`** — `POST` raw bytes, get an armored `-----BEGIN SSH SIGNATURE-----`
-  back with namespace `git`. Byte-identical to `ssh-keygen -Y sign` for
-  deterministic schemes (Ed25519, RSA `rsa-sha2-512`).
-- **`/publickey`** — `GET` the OpenSSH-format public key line. Lets the
-  container-side shim fetch and cache the pubkey on demand so **no specific
-  key is baked into the container** (see [Dynamic public key](#dynamic-public-key)).
+- **`/sign`** — `POST` raw bytes, get an armored
+  `-----BEGIN SSH SIGNATURE-----` back with namespace `git`.
+  Byte-identical to `ssh-keygen -Y sign` for deterministic schemes
+  (Ed25519, RSA `rsa-sha2-512`). The private key is resolved from
+  1Password fresh on every call — nothing is cached across requests,
+  and rotating the key in 1Password takes effect immediately.
+- **`/publickey`** — `GET` the OpenSSH-format public key line for
+  the key 1Password is currently serving. Lets the container-side shim
+  fetch and cache the pubkey on demand so **no specific key is baked
+  into the container** (see [Dynamic public key](#dynamic-public-key)).
+- **`/ref`** — `POST` a new `op://vault/item/field` reference (plain
+  text body) to swap the proxy to a different 1Password item at
+  runtime, without a restart. The swap is validated before committing;
+  a bad reference leaves the previous one in place. Response body is
+  the new public key line on success.
 - **`/healthz`** — liveness probe.
+
+The private key is **never cached in memory across requests** and
+**never written to disk**. Combined with Linux/macOS process hardening
+(`mlockall`, `PR_SET_DUMPABLE=0` / `PT_DENY_ATTACH`, `RLIMIT_CORE=0`)
+this narrows the window where a local attacker could see it to a
+single in-flight request. See [Security notes](#security-notes) for
+what this does and does not protect.
 
 ---
 
@@ -314,19 +333,100 @@ reject.
 
 ## Security notes
 
-- **Loopback only by default.** Any local process running as your user
-  can call `/sign` and get signatures without authentication. For a
-  personal dev box this is the same trust boundary as `ssh-agent`.
-- **The token lives in `~/.config/op-sign-proxy/env` at mode 0600.**
-  systemd reads it before the service starts; the service itself runs
-  with `ProtectHome=read-only` and never writes to disk.
-- **The private key never touches disk on the proxy side.** It is
-  resolved from 1Password at startup and held in memory for the lifetime
-  of the process.
-- **The container never sees the private key.** It only sees signatures
-  and (optionally) the public key.
-- The proxy does not implement per-request authentication or rate
-  limiting. If you need either, run it behind a Unix socket that you
-  bind-mount into the container, or put a minimal auth token in front of
-  it. Both are left as exercises; the codebase is small enough that
-  either is a short patch.
+### Threat model
+
+**Defends against:**
+
+- An attacker with remote network access. The proxy binds `127.0.0.1`
+  only; nothing listens on an external interface.
+- Another unprivileged local process (not your user) scraping the key
+  from `/proc/$pid/mem` or attaching via `ptrace`. On Linux we call
+  `prctl(PR_SET_DUMPABLE, 0)` early in `main`, which makes the process
+  undebuggable except by root and makes `/proc/$pid/mem` root-only.
+  On macOS we call `ptrace(PT_DENY_ATTACH, 0, 0, 0)` for the same
+  effect (officially deprecated but still functional).
+- Key material ending up in a swap file. On Linux and macOS we
+  `mlockall(MCL_CURRENT | MCL_FUTURE)` at startup, so no page of this
+  process can be paged to disk. The systemd user unit sets
+  `LimitMEMLOCK=infinity` so this doesn't silently fall back to "swap
+  protection off".
+- Key material ending up in a core dump. We drop `RLIMIT_CORE=0`
+  ourselves, `PR_SET_DUMPABLE=0` disables kernel-triggered dumps, and
+  the systemd unit also sets `LimitCORE=0` — triple belt-and-suspenders.
+- Re-gaining privileges on exec. We set `PR_SET_NO_NEW_PRIVS=1` on
+  Linux and the systemd unit sets `NoNewPrivileges=true`.
+- Key rotation drift: the proxy **re-fetches the private key from
+  1Password on every `/sign` and `/publickey` request**. There is no
+  in-memory cache of the signer across requests. Rotating the key in
+  1Password takes effect on the very next request, at the cost of one
+  SDK round-trip per sign.
+- The container seeing the key. The container never receives the
+  private key; it only ever sees signatures (and, optionally, the
+  public key line fetched from `/publickey`).
+
+**Does NOT defend against:**
+
+- Root on the same host. Root can read `/proc/$pid/mem`, load a kernel
+  module, use EndpointSecurity on macOS, or trace syscalls regardless
+  of any userspace mitigation.
+- Another process running as your own user. It can already call
+  `/sign` and get arbitrary signatures. Same trust boundary as
+  `ssh-agent`.
+- The 1Password SDK's internal memory. The SDK returns secrets as Go
+  `string` values, which are immutable; we cannot zero the PEM bytes
+  after use, and the SDK may hold its own copies inside its wazero
+  runtime. "Key not held in memory across requests" means "we, the
+  proxy, do not keep a reference" — it does not mean the bytes have
+  been scrubbed from every address the runtime ever put them in.
+- Hardware attacks (cold-boot, DMA, physical access).
+- A compromised 1Password service account token. Anyone with the token
+  can read the same secret the proxy reads, with or without the proxy.
+
+### Config hygiene
+
+- The service-account token lives in `~/.config/op-sign-proxy/env` at
+  mode 0600. systemd reads it before the service starts; the service
+  itself runs with `ProtectHome=read-only` and never writes to disk.
+- Don't check the env file into git. Don't log its contents. Don't
+  export `OP_SERVICE_ACCOUNT_TOKEN` in your interactive shell unless
+  you also scope it with a subshell — children inherit it.
+
+### Authentication on the HTTP endpoints
+
+The proxy does not implement per-request authentication or rate
+limiting. Any local process running as your user can call `/sign`,
+`/publickey`, or `/ref` without a token. This is the same trust
+boundary as `ssh-agent`, and for a personal signing proxy on a dev
+machine it is the right tradeoff.
+
+If you need stronger isolation:
+
+- Run the proxy on a Unix socket you bind-mount selectively into
+  containers (`OP_SIGN_PROXY_ADDR` is currently TCP-only; you'd need
+  a small patch).
+- Put a minimal bearer-token check in front of `/sign` and `/ref`.
+- Use the `POST /ref` endpoint to ensure the proxy is only pointing at
+  the key you intend — a compromised local process can swap it to
+  another item in the same vault, but cannot point it at items the
+  service account can't read (the swap validates by actually
+  resolving the new reference first).
+
+### Runtime secret-reference swap
+
+`POST /ref` accepts a plain-text body with a new `op://vault/item/field`
+reference. The swap is atomic with respect to in-flight `/sign`
+requests (both paths serialize on the same mutex) and validates the
+new reference by doing a fresh resolve+parse before committing. On
+success the response body is the new public key line. On failure the
+previous reference is untouched.
+
+```sh
+curl --silent --fail \
+    --data "op://Personal/Git Signing (new)/private key" \
+    http://127.0.0.1:7221/ref
+# ssh-ed25519 AAAA… op-sign-proxy
+```
+
+This is the rotation escape hatch for scenarios where you create the
+new key alongside the old one in a different item, validate it, and
+then want to flip the proxy to it without a restart.
