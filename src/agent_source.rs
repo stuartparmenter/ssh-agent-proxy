@@ -1,5 +1,5 @@
-use std::cell::RefCell;
 use std::io::{self, Read, Write};
+use std::sync::Mutex;
 
 use thiserror::Error;
 
@@ -105,7 +105,7 @@ impl AgentSource {
 
         // 5. Build the signer.
         let signer = AgentBackedSigner {
-            client: RefCell::new(client),
+            client: Mutex::new(client),
             pub_key: sshsig::SshPublicKey {
                 wire: chosen.blob.clone(),
             },
@@ -122,11 +122,11 @@ impl AgentSource {
 
 /// A `sshsig::Signer` that delegates to an SSH agent connection.
 ///
-/// Uses `RefCell` for interior mutability because `sshsig::Signer::sign`
-/// takes `&self` but `AgentClient::sign` needs `&mut self`. This is safe
-/// because each HTTP request gets its own signer — no cross-thread sharing.
+/// Uses `Mutex` for interior mutability because `sshsig::Signer::sign`
+/// takes `&self` but `AgentClient::sign` needs `&mut self`. Each HTTP
+/// request gets its own signer, so contention is not a concern.
 struct AgentBackedSigner {
-    client: RefCell<AgentClient<Box<dyn ReadWriteStream>>>,
+    client: Mutex<AgentClient<Box<dyn ReadWriteStream>>>,
     pub_key: sshsig::SshPublicKey,
     key_type: String,
 }
@@ -137,7 +137,7 @@ impl sshsig::Signer for AgentBackedSigner {
     }
 
     fn sign(&self, data: &[u8]) -> Result<sshsig::SshSignature, Box<dyn std::error::Error + Send + Sync>> {
-        let mut client = self.client.borrow_mut();
+        let mut client = self.client.lock().unwrap();
 
         // For RSA keys, force rsa-sha2-512 via the flag.
         let (flags, want_fmt) = if self.key_type == KEY_ALGO_RSA {
