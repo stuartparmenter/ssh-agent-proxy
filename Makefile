@@ -2,8 +2,8 @@
 #
 # Most of the value here is the systemd user-service install lifecycle
 # (install-systemd, uninstall-systemd, status, logs). The build / test /
-# vet targets are thin aliases for muscle memory — call `go` directly if
-# you prefer.
+# clippy targets are thin aliases for muscle memory — call `cargo` directly
+# if you prefer.
 #
 # Run `make` or `make help` to see all targets.
 
@@ -21,39 +21,37 @@ UNIT_DEST := $(SYSTEMD_USER_DIR)/ssh-agent-proxy.service
 ENV_SRC   := contrib/systemd/env.example
 ENV_DEST  := $(CONFIG_DIR)/env
 
-# --- Go targets ---------------------------------------------------------
+# --- Cargo targets ------------------------------------------------------
 
 .PHONY: build
-build: ## Build the ssh-agent-proxy binary for the host platform into ./bin/
-	@mkdir -p bin
-	go build -o bin/ssh-agent-proxy ./cmd/ssh-agent-proxy
+build: ## Build the ssh-agent-proxy binary for the host platform (release)
+	cargo build --release
 
 .PHONY: build-windows
-build-windows: ## Cross-compile the Windows binary into ./bin/ssh-agent-proxy.exe
-	@mkdir -p bin
-	GOOS=windows GOARCH=amd64 go build -o bin/ssh-agent-proxy.exe ./cmd/ssh-agent-proxy
+build-windows: ## Cross-compile the Windows binary (x86_64-pc-windows-gnu)
+	cargo build --release --target x86_64-pc-windows-gnu
 
 .PHONY: build-darwin
-build-darwin: ## Cross-compile the macOS (arm64) binary into ./bin/ssh-agent-proxy-darwin
-	@mkdir -p bin
-	GOOS=darwin GOARCH=arm64 go build -o bin/ssh-agent-proxy-darwin ./cmd/ssh-agent-proxy
+build-darwin: ## Cross-compile the macOS (aarch64-apple-darwin) binary
+	cargo build --release --target aarch64-apple-darwin
 
 .PHONY: build-all
-build-all: build build-windows build-darwin ## Cross-compile for Linux, Windows, and macOS
+build-all: build build-windows build-darwin ## Build for Linux, Windows, and macOS
 
 .PHONY: test
 test: ## Run the full test suite
-	go test ./...
+	cargo test
 
 .PHONY: vet
-vet: ## Run go vet
-	go vet ./...
+vet: ## Run clippy (Rust equivalent of go vet)
+	cargo clippy -- -D warnings
 
 .PHONY: check
-check: vet test ## Run go vet and go test
+check: vet test ## Run clippy and tests
 
 .PHONY: clean
 clean: ## Remove built artifacts
+	cargo clean
 	rm -rf bin
 
 # --- Install / systemd lifecycle ---------------------------------------
@@ -61,7 +59,7 @@ clean: ## Remove built artifacts
 .PHONY: install
 install: build ## Install the binary into $(BINDIR) (default ~/.local/bin)
 	install -d -m 0755 $(BINDIR)
-	install -m 0755 bin/ssh-agent-proxy $(BINDIR)/ssh-agent-proxy
+	install -m 0755 target/release/ssh-agent-proxy $(BINDIR)/ssh-agent-proxy
 	@echo "Installed $(BINDIR)/ssh-agent-proxy"
 
 .PHONY: install-systemd
