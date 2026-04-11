@@ -19,7 +19,7 @@ pub fn harden() {
 
     // 3. ptrace(PT_DENY_ATTACH, 0, 0, 0) (prevent debugger attachment)
     unsafe {
-        if libc::ptrace(PT_DENY_ATTACH, 0, std::ptr::null_mut::<libc::c_void>(), 0) != 0 {
+        if libc::ptrace(PT_DENY_ATTACH, 0, std::ptr::null_mut::<libc::c_char>(), 0) != 0 {
             warn!(
                 "failed to set PT_DENY_ATTACH: {}",
                 std::io::Error::last_os_error()
