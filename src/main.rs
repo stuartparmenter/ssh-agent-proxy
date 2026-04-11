@@ -67,8 +67,8 @@ async fn main() {
     }
 }
 
-async fn run() -> Result<(), Box<dyn std::error::Error>> {
-    let cfg = config::Config::from_env().map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let cfg = config::Config::from_env().map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { e.into() })?;
 
     let dialer: Box<dyn agent_source::AgentDialer> = {
         #[cfg(unix)]

@@ -2,7 +2,7 @@
 //!
 //! This module is only compiled on Windows (`#[cfg(windows)]`).
 
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::mpsc;
 use std::time::Duration;

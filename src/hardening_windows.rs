@@ -13,7 +13,7 @@ const PROCESS_STRICT_HANDLE_CHECK_POLICY: i32 = 3;
 const PROCESS_EXTENSION_POINT_DISABLE_POLICY: i32 = 6;
 const PROCESS_IMAGE_LOAD_POLICY: i32 = 10;
 
-extern "system" {
+unsafe extern "system" {
     fn SetProcessMitigationPolicy(policy: i32, buffer: *const u8, length: usize) -> i32;
 }
 
