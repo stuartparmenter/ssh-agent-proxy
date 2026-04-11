@@ -77,9 +77,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         #[cfg(windows)]
         {
-            Box::new(dialer_windows::NamedPipeDialer::new(
-                cfg.agent_path.clone(),
-            ))
+            Box::new(dialer_windows::NamedPipeDialer::new(cfg.agent_path.clone()))
         }
         #[cfg(not(any(unix, windows)))]
         {
@@ -90,10 +88,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let source = agent_source::AgentSource::new(dialer, cfg.pubkey.clone());
 
     log::info!("signing via agent at {}", cfg.agent_path);
-    if let Some(ref pk) = cfg.pubkey {
-        if let Ok(line) = config::marshal_authorized_key(pk) {
-            log::info!("restricted to pubkey: {}", line.trim());
-        }
+    if let Some(ref pk) = cfg.pubkey
+        && let Ok(line) = config::marshal_authorized_key(pk)
+    {
+        log::info!("restricted to pubkey: {}", line.trim());
     }
 
     let state = Arc::new(server::AppState {

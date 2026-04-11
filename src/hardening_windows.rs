@@ -14,11 +14,7 @@ const PROCESS_EXTENSION_POINT_DISABLE_POLICY: i32 = 6;
 const PROCESS_IMAGE_LOAD_POLICY: i32 = 10;
 
 extern "system" {
-    fn SetProcessMitigationPolicy(
-        policy: i32,
-        buffer: *const u8,
-        length: usize,
-    ) -> i32;
+    fn SetProcessMitigationPolicy(policy: i32, buffer: *const u8, length: usize) -> i32;
 }
 
 fn set_mitigation_policy(name: &str, policy_id: i32, flags: u32) {

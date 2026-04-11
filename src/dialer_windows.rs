@@ -16,10 +16,7 @@ impl NamedPipeDialer {
 
 impl AgentDialer for NamedPipeDialer {
     fn dial(&self) -> Result<Box<dyn ReadWriteStream>, io::Error> {
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(&self.path)?;
+        let file = OpenOptions::new().read(true).write(true).open(&self.path)?;
         Ok(Box::new(file))
     }
 

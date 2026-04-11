@@ -1,5 +1,5 @@
-use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
+use base64::engine::general_purpose::STANDARD;
 use sha2::{Digest, Sha256, Sha512};
 use thiserror::Error;
 
@@ -28,8 +28,8 @@ pub enum Error {
     EmptyNamespace,
     #[error("unsupported hash algorithm: {0}")]
     UnsupportedHash(String),
-    #[error("sign error: {0}")]
-    SignError(String),
+    #[error("sign: {0}")]
+    Sign(String),
 }
 
 // ---------------------------------------------------------------------------
@@ -171,7 +171,7 @@ pub fn sign_with_hash(
     // 3. Sign it.
     let sig = signer
         .sign(&signed_data)
-        .map_err(|e| Error::SignError(e.to_string()))?;
+        .map_err(|e| Error::Sign(e.to_string()))?;
 
     // 4. Marshal the full SSHSIG envelope.
     let envelope = marshal_signature(signer.public_key(), namespace, hash_alg, &sig);
@@ -232,7 +232,10 @@ mod tests {
 
         // All base64 lines except possibly the last one must be exactly 70 chars.
         let b64_lines = &lines[1..lines.len() - 1];
-        assert!(!b64_lines.is_empty(), "should have at least one base64 line");
+        assert!(
+            !b64_lines.is_empty(),
+            "should have at least one base64 line"
+        );
         for line in &b64_lines[..b64_lines.len() - 1] {
             assert_eq!(
                 line.len(),
@@ -402,8 +405,8 @@ mod tests {
         dir: &std::path::Path,
         signing_key: &ed25519_dalek::SigningKey,
     ) -> String {
-        use ssh_key::private::Ed25519Keypair;
         use ssh_key::PrivateKey;
+        use ssh_key::private::Ed25519Keypair;
 
         let keypair = Ed25519Keypair::from(signing_key);
         let private_key = PrivateKey::from(keypair);
@@ -491,12 +494,9 @@ mod tests {
     }
 
     /// Write an RSA private key to a temp file in OpenSSH format, returning the path.
-    fn write_rsa_key_file(
-        dir: &std::path::Path,
-        private_key: &rsa::RsaPrivateKey,
-    ) -> String {
-        use ssh_key::private::RsaKeypair;
+    fn write_rsa_key_file(dir: &std::path::Path, private_key: &rsa::RsaPrivateKey) -> String {
         use ssh_key::PrivateKey;
+        use ssh_key::private::RsaKeypair;
 
         let keypair =
             RsaKeypair::try_from(private_key).expect("convert rsa key to ssh-key keypair");
@@ -544,7 +544,8 @@ mod tests {
         let theirs = run_ssh_keygen_sign(&key_path, namespace, message);
 
         assert_eq!(
-            ours, theirs,
+            ours,
+            theirs,
             "Ed25519 signature mismatch\nours:\n{}\ntheirs:\n{}",
             String::from_utf8_lossy(&ours),
             String::from_utf8_lossy(&theirs)
@@ -560,8 +561,7 @@ mod tests {
         }
 
         let mut rng = rand::rngs::OsRng;
-        let private_key =
-            rsa::RsaPrivateKey::new(&mut rng, 2048).expect("generate rsa key");
+        let private_key = rsa::RsaPrivateKey::new(&mut rng, 2048).expect("generate rsa key");
 
         let signer = RsaTestSigner::new(private_key.clone());
 
@@ -575,7 +575,8 @@ mod tests {
         let theirs = run_ssh_keygen_sign(&key_path, namespace, message);
 
         assert_eq!(
-            ours, theirs,
+            ours,
+            theirs,
             "RSA signature mismatch\nours:\n{}\ntheirs:\n{}",
             String::from_utf8_lossy(&ours),
             String::from_utf8_lossy(&theirs)
@@ -611,8 +612,7 @@ mod tests {
         }
 
         let mut rng = rand::rngs::OsRng;
-        let private_key =
-            rsa::RsaPrivateKey::new(&mut rng, 2048).expect("generate rsa key");
+        let private_key = rsa::RsaPrivateKey::new(&mut rng, 2048).expect("generate rsa key");
         let signer = RsaTestSigner::new(private_key);
 
         let namespace = "git";

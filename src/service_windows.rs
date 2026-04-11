@@ -17,8 +17,8 @@ use windows_service::service_manager::{ServiceManager, ServiceManagerAccess};
 
 use windows_sys::Win32::Foundation::ERROR_SERVICE_DOES_NOT_EXIST;
 use windows_sys::Win32::System::Registry::{
-    RegCloseKey, RegCreateKeyExW, RegSetValueExW, HKEY, HKEY_LOCAL_MACHINE, KEY_SET_VALUE,
-    REG_MULTI_SZ, REG_OPTION_NON_VOLATILE,
+    HKEY, HKEY_LOCAL_MACHINE, KEY_SET_VALUE, REG_MULTI_SZ, REG_OPTION_NON_VOLATILE, RegCloseKey,
+    RegCreateKeyExW, RegSetValueExW,
 };
 
 const SERVICE_NAME: &str = "ssh-agent-proxy";
@@ -290,10 +290,7 @@ fn install_service(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
 // ---------------------------------------------------------------------------
 
 fn uninstall_service() -> Result<(), Box<dyn std::error::Error>> {
-    let manager = ServiceManager::local_computer(
-        None::<&str>,
-        ServiceManagerAccess::CONNECT,
-    )?;
+    let manager = ServiceManager::local_computer(None::<&str>, ServiceManagerAccess::CONNECT)?;
 
     let service_access = ServiceAccess::QUERY_STATUS | ServiceAccess::STOP | ServiceAccess::DELETE;
     let service = manager.open_service(SERVICE_NAME, service_access)?;
@@ -339,10 +336,9 @@ fn collect_service_env() -> Result<Vec<(String, String)>, Box<dyn std::error::Er
             if !val.is_empty() {
                 // Guard against embedded newlines — they would corrupt the REG_MULTI_SZ value.
                 if val.contains('\n') || val.contains('\r') {
-                    return Err(format!(
-                        "environment variable {name} contains embedded newlines"
-                    )
-                    .into());
+                    return Err(
+                        format!("environment variable {name} contains embedded newlines").into(),
+                    );
                 }
                 pairs.push((name.to_string(), val));
             }
@@ -360,9 +356,7 @@ fn set_service_environment(
     service_name: &str,
     pairs: &[(String, String)],
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let subkey = format!(
-        "SYSTEM\\CurrentControlSet\\Services\\{service_name}\\Environment"
-    );
+    let subkey = format!("SYSTEM\\CurrentControlSet\\Services\\{service_name}\\Environment");
 
     // Build REG_MULTI_SZ value: "KEY=VALUE\0KEY=VALUE\0\0"
     let mut wide: Vec<u16> = Vec::new();
@@ -377,7 +371,10 @@ fn set_service_environment(
 
     let subkey_wide: Vec<u16> = subkey.encode_utf16().chain(std::iter::once(0)).collect();
     let value_name = ""; // default value
-    let value_name_wide: Vec<u16> = value_name.encode_utf16().chain(std::iter::once(0)).collect();
+    let value_name_wide: Vec<u16> = value_name
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
 
     unsafe {
         let mut hkey: HKEY = std::ptr::null_mut() as HKEY;
@@ -434,8 +431,8 @@ fn set_service_environment(
 ///
 /// Writes to `%LOCALAPPDATA%\ssh-agent-proxy\service.log`.
 fn init_service_logging() -> Result<(), Box<dyn std::error::Error>> {
-    let local_app_data = std::env::var("LOCALAPPDATA")
-        .unwrap_or_else(|_| r"C:\ProgramData".to_string());
+    let local_app_data =
+        std::env::var("LOCALAPPDATA").unwrap_or_else(|_| r"C:\ProgramData".to_string());
     let log_dir = PathBuf::from(local_app_data).join("ssh-agent-proxy");
     std::fs::create_dir_all(&log_dir)?;
     let log_path = log_dir.join("service.log");

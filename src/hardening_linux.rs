@@ -1,5 +1,5 @@
 use log::warn;
-use nix::sys::resource::{setrlimit, Resource};
+use nix::sys::resource::{Resource, setrlimit};
 
 pub fn harden() {
     // 1. RLIMIT_CORE = 0 (no core dumps)
@@ -30,10 +30,7 @@ pub fn harden() {
     // 4. mlockall(MCL_CURRENT | MCL_FUTURE) (keep pages in RAM, no swap)
     unsafe {
         if libc::mlockall(libc::MCL_CURRENT | libc::MCL_FUTURE) != 0 {
-            warn!(
-                "failed to mlockall: {}",
-                std::io::Error::last_os_error()
-            );
+            warn!("failed to mlockall: {}", std::io::Error::last_os_error());
         }
     }
 }

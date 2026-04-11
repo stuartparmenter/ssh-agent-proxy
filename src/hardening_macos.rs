@@ -1,5 +1,5 @@
 use log::warn;
-use nix::sys::resource::{setrlimit, Resource};
+use nix::sys::resource::{Resource, setrlimit};
 
 /// PT_DENY_ATTACH prevents debuggers from attaching to this process.
 const PT_DENY_ATTACH: libc::c_int = 31;
@@ -13,10 +13,7 @@ pub fn harden() {
     // 2. mlockall(MCL_CURRENT | MCL_FUTURE) (keep pages in RAM, no swap)
     unsafe {
         if libc::mlockall(libc::MCL_CURRENT | libc::MCL_FUTURE) != 0 {
-            warn!(
-                "failed to mlockall: {}",
-                std::io::Error::last_os_error()
-            );
+            warn!("failed to mlockall: {}", std::io::Error::last_os_error());
         }
     }
 

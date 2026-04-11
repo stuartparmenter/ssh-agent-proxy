@@ -152,9 +152,7 @@ fn read_string(data: &[u8], offset: usize) -> Result<(&[u8], usize), AgentError>
 /// Parse an IDENTITIES_ANSWER body (after the message type byte).
 fn parse_identities_answer(data: &[u8]) -> Result<Vec<AgentKey>, AgentError> {
     if data.len() < 4 {
-        return Err(AgentError::Malformed(
-            "identities answer too short".into(),
-        ));
+        return Err(AgentError::Malformed("identities answer too short".into()));
     }
 
     let nkeys = u32::from_be_bytes(data[0..4].try_into().unwrap()) as usize;
@@ -212,7 +210,8 @@ mod tests {
 
     #[test]
     fn test_parse_identities_answer_one_key() {
-        let key_blob = b"\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        let key_blob =
+            b"\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
         let comment = b"test-key";
 
         // Build the body after the message type byte: nkeys=1, string(key_blob), string(comment)

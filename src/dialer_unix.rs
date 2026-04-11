@@ -24,5 +24,7 @@ impl AgentDialer for UnixDialer {
 }
 
 pub fn default_agent_path() -> Option<String> {
-    std::env::var("SSH_AUTH_SOCK").ok().filter(|s| !s.is_empty())
+    std::env::var("SSH_AUTH_SOCK")
+        .ok()
+        .filter(|s| !s.is_empty())
 }

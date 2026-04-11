@@ -131,7 +131,10 @@ impl sshsig::Signer for AgentBackedSigner {
         &self.pub_key
     }
 
-    fn sign(&self, data: &[u8]) -> Result<sshsig::SshSignature, Box<dyn std::error::Error + Send + Sync>> {
+    fn sign(
+        &self,
+        data: &[u8],
+    ) -> Result<sshsig::SshSignature, Box<dyn std::error::Error + Send + Sync>> {
         let mut client = self.client.lock().unwrap();
 
         // For RSA keys, force rsa-sha2-512 via the flag.

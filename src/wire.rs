@@ -1,4 +1,4 @@
-/// SSH wire-format primitives shared by the agent protocol and SSHSIG modules.
+//! SSH wire-format primitives shared by the agent protocol and SSHSIG modules.
 
 /// Write an SSH-string (4-byte big-endian length prefix + payload) into `buf`.
 pub fn write_string(buf: &mut Vec<u8>, data: &[u8]) {

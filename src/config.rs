@@ -46,17 +46,17 @@ fn env_or_default(name: &str, default: &str) -> String {
 }
 
 fn load_pubkey_line() -> Result<Option<String>, String> {
-    if let Ok(line) = std::env::var("SSH_AGENT_PROXY_PUBKEY") {
-        if !line.is_empty() {
-            return Ok(Some(line));
-        }
+    if let Ok(line) = std::env::var("SSH_AGENT_PROXY_PUBKEY")
+        && !line.is_empty()
+    {
+        return Ok(Some(line));
     }
-    if let Ok(path) = std::env::var("SSH_AGENT_PROXY_PUBKEY_FILE") {
-        if !path.is_empty() {
-            let data = fs::read_to_string(&path)
-                .map_err(|e| format!("read SSH_AGENT_PROXY_PUBKEY_FILE: {e}"))?;
-            return Ok(Some(data));
-        }
+    if let Ok(path) = std::env::var("SSH_AGENT_PROXY_PUBKEY_FILE")
+        && !path.is_empty()
+    {
+        let data = fs::read_to_string(&path)
+            .map_err(|e| format!("read SSH_AGENT_PROXY_PUBKEY_FILE: {e}"))?;
+        return Ok(Some(data));
     }
     Ok(None)
 }
@@ -81,8 +81,7 @@ pub fn marshal_authorized_key(wire: &[u8]) -> Result<String, String> {
     if wire.len() < 4 + type_len {
         return Err("key truncated".into());
     }
-    let key_type =
-        std::str::from_utf8(&wire[4..4 + type_len]).map_err(|_| "invalid key type")?;
+    let key_type = std::str::from_utf8(&wire[4..4 + type_len]).map_err(|_| "invalid key type")?;
     use base64::Engine;
     let b64 = base64::engine::general_purpose::STANDARD.encode(wire);
     Ok(format!("{key_type} {b64}\n"))
