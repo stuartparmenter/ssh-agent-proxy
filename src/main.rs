@@ -1,3 +1,4 @@
+mod agent;
 mod sshsig;
 
 fn main() {
