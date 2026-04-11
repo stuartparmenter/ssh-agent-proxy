@@ -18,6 +18,7 @@ pub const SSH_AGENT_RSA_SHA2_512: u32 = 0x04;
 const MAX_RESPONSE_SIZE: u32 = 256 * 1024;
 
 /// A public key returned by the agent.
+#[derive(Debug)]
 pub struct AgentKey {
     /// Wire-format public key blob.
     pub blob: Vec<u8>,
