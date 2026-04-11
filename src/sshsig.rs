@@ -278,4 +278,359 @@ mod tests {
         assert_eq!(&blob[6..10], &[0, 0, 0, 3]);
         assert_eq!(&blob[10..13], b"git");
     }
+
+    // -----------------------------------------------------------------------
+    // SSHSIG byte-equality tests against ssh-keygen
+    // -----------------------------------------------------------------------
+
+    use ed25519_dalek::Signer as DalekSigner;
+    use rsa::traits::PublicKeyParts;
+    use signature::SignatureEncoding;
+
+    /// Check whether ssh-keygen is available; return its path or None.
+    fn find_ssh_keygen() -> Option<String> {
+        std::process::Command::new("ssh-keygen")
+            .arg("-Y")
+            .arg("sign")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .ok()
+            .map(|_| "ssh-keygen".to_string())
+    }
+
+    /// Run `ssh-keygen -Y sign -n <namespace> -f <keyfile>` piping `message`
+    /// on stdin. Returns the armored signature bytes from stdout.
+    fn run_ssh_keygen_sign(key_path: &str, namespace: &str, message: &[u8]) -> Vec<u8> {
+        let output = std::process::Command::new("ssh-keygen")
+            .args(["-Y", "sign", "-n", namespace, "-f", key_path])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .and_then(|mut child| {
+                use std::io::Write;
+                child
+                    .stdin
+                    .take()
+                    .unwrap()
+                    .write_all(message)
+                    .expect("write stdin");
+                child.wait_with_output()
+            })
+            .expect("ssh-keygen -Y sign failed");
+
+        assert!(
+            output.status.success(),
+            "ssh-keygen -Y sign failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output.stdout
+    }
+
+    /// Run `ssh-keygen -Y check-novalidate` to verify a signature is accepted.
+    fn run_ssh_keygen_check(namespace: &str, message: &[u8], signature: &[u8]) {
+        let dir = tempfile::tempdir().expect("create tempdir");
+        let sig_path = dir.path().join("msg.sig");
+        std::fs::write(&sig_path, signature).expect("write sig file");
+
+        let output = std::process::Command::new("ssh-keygen")
+            .args([
+                "-Y",
+                "check-novalidate",
+                "-n",
+                namespace,
+                "-s",
+                sig_path.to_str().unwrap(),
+            ])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .and_then(|mut child| {
+                use std::io::Write;
+                child
+                    .stdin
+                    .take()
+                    .unwrap()
+                    .write_all(message)
+                    .expect("write stdin");
+                child.wait_with_output()
+            })
+            .expect("ssh-keygen -Y check-novalidate failed");
+
+        assert!(
+            output.status.success(),
+            "ssh-keygen -Y check-novalidate rejected our signature:\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    // -- Ed25519 test signer --------------------------------------------------
+
+    /// A Signer backed by a local Ed25519 key for tests.
+    struct Ed25519TestSigner {
+        signing_key: ed25519_dalek::SigningKey,
+        pubkey: SshPublicKey,
+    }
+
+    impl Ed25519TestSigner {
+        fn new(signing_key: ed25519_dalek::SigningKey) -> Self {
+            let verifying_key = signing_key.verifying_key();
+            let pk_bytes = verifying_key.to_bytes();
+
+            // SSH wire format: SSH-string("ssh-ed25519") + SSH-string(32-byte key)
+            let mut wire = Vec::new();
+            write_ssh_string(&mut wire, b"ssh-ed25519");
+            write_ssh_string(&mut wire, &pk_bytes);
+
+            Self {
+                signing_key,
+                pubkey: SshPublicKey { wire },
+            }
+        }
+    }
+
+    impl super::Signer for Ed25519TestSigner {
+        fn public_key(&self) -> &SshPublicKey {
+            &self.pubkey
+        }
+
+        fn sign(
+            &self,
+            data: &[u8],
+        ) -> Result<SshSignature, Box<dyn std::error::Error + Send + Sync>> {
+            let sig = self.signing_key.sign(data);
+            Ok(SshSignature {
+                format: "ssh-ed25519".to_string(),
+                blob: sig.to_bytes().to_vec(),
+            })
+        }
+    }
+
+    /// Write an Ed25519 private key to a temp file in OpenSSH format, returning the path.
+    fn write_ed25519_key_file(
+        dir: &std::path::Path,
+        signing_key: &ed25519_dalek::SigningKey,
+    ) -> String {
+        use ssh_key::private::Ed25519Keypair;
+        use ssh_key::PrivateKey;
+
+        let keypair = Ed25519Keypair::from(signing_key);
+        let private_key = PrivateKey::from(keypair);
+        let pem = private_key
+            .to_openssh(ssh_key::LineEnding::LF)
+            .expect("serialize ed25519 key to openssh");
+
+        let key_path = dir.join("id_ed25519");
+        std::fs::write(&key_path, pem.as_str()).expect("write key file");
+
+        // Set permissions to 0600 so ssh-keygen will accept it.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600))
+                .expect("chmod 600");
+        }
+
+        key_path.to_str().unwrap().to_string()
+    }
+
+    // -- RSA test signer ------------------------------------------------------
+
+    /// A Signer backed by a local RSA key for tests.
+    struct RsaTestSigner {
+        signing_key: rsa::pkcs1v15::SigningKey<sha2::Sha512>,
+        pubkey: SshPublicKey,
+    }
+
+    impl RsaTestSigner {
+        fn new(private_key: rsa::RsaPrivateKey) -> Self {
+            let public_key = private_key.to_public_key();
+
+            // SSH wire format for RSA: SSH-string("ssh-rsa") + SSH-string(e) + SSH-string(n)
+            // Both e and n are encoded as mpint (big-endian, with leading zero if MSB set).
+            let mut wire = Vec::new();
+            write_ssh_string(&mut wire, b"ssh-rsa");
+            write_ssh_string(&mut wire, &to_ssh_mpint(&public_key.e().to_bytes_be()));
+            write_ssh_string(&mut wire, &to_ssh_mpint(&public_key.n().to_bytes_be()));
+
+            let signing_key = rsa::pkcs1v15::SigningKey::<sha2::Sha512>::new(private_key);
+
+            Self {
+                signing_key,
+                pubkey: SshPublicKey { wire },
+            }
+        }
+    }
+
+    /// Convert a big-endian unsigned integer to SSH mpint encoding.
+    /// SSH mpint prepends a zero byte if the MSB of the first byte is set.
+    fn to_ssh_mpint(bytes: &[u8]) -> Vec<u8> {
+        // Strip leading zeros (but keep at least one byte).
+        let stripped = match bytes.iter().position(|&b| b != 0) {
+            Some(pos) => &bytes[pos..],
+            None => &[0],
+        };
+
+        if stripped[0] & 0x80 != 0 {
+            let mut result = Vec::with_capacity(1 + stripped.len());
+            result.push(0);
+            result.extend_from_slice(stripped);
+            result
+        } else {
+            stripped.to_vec()
+        }
+    }
+
+    impl super::Signer for RsaTestSigner {
+        fn public_key(&self) -> &SshPublicKey {
+            &self.pubkey
+        }
+
+        fn sign(
+            &self,
+            data: &[u8],
+        ) -> Result<SshSignature, Box<dyn std::error::Error + Send + Sync>> {
+            use signature::Signer as _;
+            let sig = self.signing_key.sign(data);
+            Ok(SshSignature {
+                format: "rsa-sha2-512".to_string(),
+                blob: sig.to_vec(),
+            })
+        }
+    }
+
+    /// Write an RSA private key to a temp file in OpenSSH format, returning the path.
+    fn write_rsa_key_file(
+        dir: &std::path::Path,
+        private_key: &rsa::RsaPrivateKey,
+    ) -> String {
+        use ssh_key::private::RsaKeypair;
+        use ssh_key::PrivateKey;
+
+        let keypair =
+            RsaKeypair::try_from(private_key).expect("convert rsa key to ssh-key keypair");
+        let ssh_private_key = PrivateKey::from(keypair);
+        let pem = ssh_private_key
+            .to_openssh(ssh_key::LineEnding::LF)
+            .expect("serialize rsa key to openssh");
+
+        let key_path = dir.join("id_rsa");
+        std::fs::write(&key_path, pem.as_str()).expect("write key file");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&key_path, std::fs::Permissions::from_mode(0o600))
+                .expect("chmod 600");
+        }
+
+        key_path.to_str().unwrap().to_string()
+    }
+
+    // -- The core byte-equality tests -----------------------------------------
+
+    /// Ed25519 is deterministic: same key + same message = same signature.
+    /// Our output must be byte-for-byte identical to `ssh-keygen -Y sign`.
+    #[test]
+    fn test_sign_matches_ssh_keygen_ed25519() {
+        if find_ssh_keygen().is_none() {
+            eprintln!("SKIPPED: ssh-keygen not available");
+            return;
+        }
+
+        let mut csprng = rand::rngs::OsRng;
+        let signing_key = ed25519_dalek::SigningKey::generate(&mut csprng);
+
+        let signer = Ed25519TestSigner::new(signing_key.clone());
+
+        let dir = tempfile::tempdir().expect("create tempdir");
+        let key_path = write_ed25519_key_file(dir.path(), &signing_key);
+
+        let namespace = "git";
+        let message = b"tree 4b825dc642cb6eb9a060e54bf8d69288fbee4904\n\ncommit body\n";
+
+        let ours = sign(&signer, namespace, message).expect("our sign");
+        let theirs = run_ssh_keygen_sign(&key_path, namespace, message);
+
+        assert_eq!(
+            ours, theirs,
+            "Ed25519 signature mismatch\nours:\n{}\ntheirs:\n{}",
+            String::from_utf8_lossy(&ours),
+            String::from_utf8_lossy(&theirs)
+        );
+    }
+
+    /// RSA with PKCS#1 v1.5 is also deterministic, so byte equality is expected.
+    #[test]
+    fn test_sign_matches_ssh_keygen_rsa() {
+        if find_ssh_keygen().is_none() {
+            eprintln!("SKIPPED: ssh-keygen not available");
+            return;
+        }
+
+        let mut rng = rand::rngs::OsRng;
+        let private_key =
+            rsa::RsaPrivateKey::new(&mut rng, 2048).expect("generate rsa key");
+
+        let signer = RsaTestSigner::new(private_key.clone());
+
+        let dir = tempfile::tempdir().expect("create tempdir");
+        let key_path = write_rsa_key_file(dir.path(), &private_key);
+
+        let namespace = "git";
+        let message = b"rsa test payload\n";
+
+        let ours = sign(&signer, namespace, message).expect("our sign");
+        let theirs = run_ssh_keygen_sign(&key_path, namespace, message);
+
+        assert_eq!(
+            ours, theirs,
+            "RSA signature mismatch\nours:\n{}\ntheirs:\n{}",
+            String::from_utf8_lossy(&ours),
+            String::from_utf8_lossy(&theirs)
+        );
+    }
+
+    /// Verify that ssh-keygen accepts our Ed25519 signatures via check-novalidate.
+    /// This catches structural problems in the blob that byte-compare might miss.
+    #[test]
+    fn test_sign_accepted_by_ssh_keygen_check() {
+        if find_ssh_keygen().is_none() {
+            eprintln!("SKIPPED: ssh-keygen not available");
+            return;
+        }
+
+        let mut csprng = rand::rngs::OsRng;
+        let signing_key = ed25519_dalek::SigningKey::generate(&mut csprng);
+        let signer = Ed25519TestSigner::new(signing_key);
+
+        let namespace = "git";
+        let message = b"hello, git signing\n";
+
+        let sig = sign(&signer, namespace, message).expect("our sign");
+        run_ssh_keygen_check(namespace, message, &sig);
+    }
+
+    /// Verify that ssh-keygen accepts our RSA signatures via check-novalidate.
+    #[test]
+    fn test_sign_rsa_accepted_by_ssh_keygen_check() {
+        if find_ssh_keygen().is_none() {
+            eprintln!("SKIPPED: ssh-keygen not available");
+            return;
+        }
+
+        let mut rng = rand::rngs::OsRng;
+        let private_key =
+            rsa::RsaPrivateKey::new(&mut rng, 2048).expect("generate rsa key");
+        let signer = RsaTestSigner::new(private_key);
+
+        let namespace = "git";
+        let message = b"rsa check-novalidate test\n";
+
+        let sig = sign(&signer, namespace, message).expect("our sign");
+        run_ssh_keygen_check(namespace, message, &sig);
+    }
 }
