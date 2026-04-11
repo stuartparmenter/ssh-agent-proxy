@@ -1,0 +1,74 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            artifact: ssh-agent-proxy
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            artifact: ssh-agent-proxy
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            artifact: ssh-agent-proxy.exe
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-${{ matrix.target }}-cargo-
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          cd target/${TARGET}/release
+          tar czf ../../../ssh-agent-proxy-${TARGET}.tar.gz ssh-agent-proxy
+          cd ../../..
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          cd target/$env:TARGET/release
+          Compress-Archive -Path ssh-agent-proxy.exe -DestinationPath ../../../ssh-agent-proxy-$env:TARGET.zip
+          cd ../../..
+
+      - name: Upload release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+          TARGET: ${{ matrix.target }}
+        run: gh release upload "${TAG}" ssh-agent-proxy-${TARGET}.* --clobber
+        shell: bash
