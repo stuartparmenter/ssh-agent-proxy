@@ -432,7 +432,7 @@ mod tests {
 
     /// A Signer backed by a local RSA key for tests.
     struct RsaTestSigner {
-        signing_key: rsa::pkcs1v15::SigningKey<sha2::Sha512>,
+        signing_key: rsa::pkcs1v15::SigningKey<rsa::sha2::Sha512>,
         pubkey: SshPublicKey,
     }
 
@@ -447,7 +447,7 @@ mod tests {
             wire::write_string(&mut wire, &to_ssh_mpint(&public_key.e().to_bytes_be()));
             wire::write_string(&mut wire, &to_ssh_mpint(&public_key.n().to_bytes_be()));
 
-            let signing_key = rsa::pkcs1v15::SigningKey::<sha2::Sha512>::new(private_key);
+            let signing_key = rsa::pkcs1v15::SigningKey::<rsa::sha2::Sha512>::new(private_key);
 
             Self {
                 signing_key,
@@ -529,8 +529,7 @@ mod tests {
             return;
         }
 
-        let mut csprng = rand::rngs::OsRng;
-        let signing_key = ed25519_dalek::SigningKey::generate(&mut csprng);
+        let signing_key = ed25519_dalek::SigningKey::generate(&mut rand_core::OsRng);
 
         let signer = Ed25519TestSigner::new(signing_key.clone());
 
@@ -560,8 +559,8 @@ mod tests {
             return;
         }
 
-        let mut rng = rand::rngs::OsRng;
-        let private_key = rsa::RsaPrivateKey::new(&mut rng, 2048).expect("generate rsa key");
+        let private_key =
+            rsa::RsaPrivateKey::new(&mut rand_core::OsRng, 2048).expect("generate rsa key");
 
         let signer = RsaTestSigner::new(private_key.clone());
 
@@ -592,8 +591,7 @@ mod tests {
             return;
         }
 
-        let mut csprng = rand::rngs::OsRng;
-        let signing_key = ed25519_dalek::SigningKey::generate(&mut csprng);
+        let signing_key = ed25519_dalek::SigningKey::generate(&mut rand_core::OsRng);
         let signer = Ed25519TestSigner::new(signing_key);
 
         let namespace = "git";
@@ -611,8 +609,8 @@ mod tests {
             return;
         }
 
-        let mut rng = rand::rngs::OsRng;
-        let private_key = rsa::RsaPrivateKey::new(&mut rng, 2048).expect("generate rsa key");
+        let private_key =
+            rsa::RsaPrivateKey::new(&mut rand_core::OsRng, 2048).expect("generate rsa key");
         let signer = RsaTestSigner::new(private_key);
 
         let namespace = "git";
