@@ -2,6 +2,11 @@ mod agent;
 mod agent_source;
 mod sshsig;
 
+#[cfg(unix)]
+mod dialer_unix;
+#[cfg(windows)]
+mod dialer_windows;
+
 #[cfg(target_os = "linux")]
 mod hardening_linux;
 #[cfg(target_os = "macos")]
