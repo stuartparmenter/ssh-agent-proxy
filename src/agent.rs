@@ -22,7 +22,8 @@ const MAX_RESPONSE_SIZE: u32 = 256 * 1024;
 pub struct AgentKey {
     /// Wire-format public key blob.
     pub blob: Vec<u8>,
-    /// Comment associated with the key.
+    /// Comment associated with the key (e.g. "user@host").
+    #[allow(dead_code)]
     pub comment: String,
 }
 

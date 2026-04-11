@@ -255,15 +255,6 @@ mod tests {
     }
 
     #[test]
-    fn test_write_ssh_string() {
-        // Tested in wire::tests; verify it works from sshsig context too
-        let mut buf = Vec::new();
-        wire::write_string(&mut buf, b"hello");
-        assert_eq!(buf[0..4], [0, 0, 0, 5]);
-        assert_eq!(&buf[4..], b"hello");
-    }
-
-    #[test]
     fn test_build_signed_blob_structure() {
         let hash = vec![0u8; 64]; // fake hash
         let blob = build_signed_data("git", HASH_SHA512, &hash);
