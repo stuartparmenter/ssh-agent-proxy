@@ -86,43 +86,40 @@ is set, the proxy uses the first key the agent advertises.
 
 ## Build
 
-With make (Linux / macOS):
+Requires Rust 1.85+ (edition 2024).
+
+With make (Linux / macOS / WSL2):
 
 ```sh
-make build                 # ./bin/ssh-agent-proxy
-make build-windows         # ./bin/ssh-agent-proxy.exe  (cross-compile)
-make build-darwin          # ./bin/ssh-agent-proxy-darwin
+make build                 # target/release/ssh-agent-proxy
+make build-windows         # cross-compile to x86_64-pc-windows-gnu
+make build-darwin          # cross-compile to aarch64-apple-darwin
 make build-all             # all three
 
 make install               # install to ~/.local/bin (override BINDIR=…)
-make check                 # go vet + go test
+make check                 # cargo clippy + cargo test
 ```
 
-Without make (Windows or anywhere with just `go`):
+On Windows (native, with Rust installed):
 
 ```powershell
-go build -o ssh-agent-proxy.exe .\cmd\ssh-agent-proxy
-# or, to install into %USERPROFILE%\go\bin:
-go install .\cmd\ssh-agent-proxy
+cargo build --release
+# binary at target\release\ssh-agent-proxy.exe
 ```
+
+From WSL2 targeting Windows (requires `rustup target add x86_64-pc-windows-gnu`
+and `apt install gcc-mingw-w64-x86-64`):
 
 ```sh
-# Linux / macOS without make:
-go build -o ssh-agent-proxy ./cmd/ssh-agent-proxy
-# or:
-go install ./cmd/ssh-agent-proxy
+make build-windows
 ```
-
-Pure Go, no CGo, no MinGW, no build-tag gymnastics. Requires
-Go 1.25+ (pinned in `go.mod`). Cross-compiles work from any host
-to any target.
 
 ## Run it interactively
 
 ```sh
 # Point at your local ssh-agent and start the proxy
 export SSH_AUTH_SOCK=$HOME/.1password/agent.sock   # or whatever
-./bin/ssh-agent-proxy
+./target/release/ssh-agent-proxy
 # listening on 127.0.0.1:7221 (namespace "git")
 ```
 
@@ -192,7 +189,7 @@ $env:SSH_AGENT_PROXY_PUBKEY_FILE = "$env:USERPROFILE\.ssh\git_signing.pub"
 .\ssh-agent-proxy.exe install
 
 # It will prompt for your Windows password so the SCM can launch the
-# service as your account. Pass -password on the command line instead
+# service as your account. Pass --password on the command line instead
 # if you're automating.
 
 sc start ssh-agent-proxy
@@ -200,11 +197,11 @@ sc start ssh-agent-proxy
 
 Flags on `install`:
 
-- `-user DOMAIN\user` — override the run-as user (default: current
+- `--user DOMAIN\user` — override the run-as user (default: current
   user from `USERDOMAIN\USERNAME`)
-- `-password PASS` — password for `-user`; prompted on stdin if
+- `--password PASS` — password for `--user`; prompted on stdin if
   omitted
-- `-system` — install as `LocalSystem` instead. Only works if the
+- `--system` — install as `LocalSystem` instead. Only works if the
   upstream agent's named pipe is accessible to SYSTEM (1Password
   Desktop's pipe typically is **not**, because it lives in the user
   session).
@@ -282,20 +279,22 @@ anything that can reach the host interface. The trust boundary is
 
 ## How the signing works under the hood
 
-`sshsig/` is a from-scratch, pure-Go implementation of OpenSSH's
+`src/sshsig.rs` is a from-scratch implementation of OpenSSH's
 [SSHSIG wire format](https://github.com/openssh/openssh-portable/blob/master/PROTOCOL.sshsig)
-plus the 70-column PEM-like armor. Given any `ssh.Signer`, it
+plus the 70-column PEM-like armor. Given any `sshsig::Signer`, it
 produces an armored signature byte-identical to what `ssh-keygen -Y
 sign -n git` would have produced for deterministic signature schemes
 (Ed25519, and RSA with `rsa-sha2-512` / PKCS#1 v1.5). There are
-byte-equality tests against `ssh-keygen` in `sshsig/sshsig_test.go`.
+byte-equality tests against `ssh-keygen` in the test suite.
 
-The `ssh.Signer` we feed it is an `agentBackedSigner` wrapping a
-`golang.org/x/crypto/ssh/agent.ExtendedAgent` client. For RSA keys
-we force the `rsa-sha2-512` flag and verify the agent honored it —
-a misbehaving agent that tried to downgrade to SHA-1 would be
+`src/agent.rs` implements a minimal SSH agent protocol client
+(REQUEST_IDENTITIES + SIGN_REQUEST only). `src/agent_source.rs`
+wraps it into an `AgentSource` that dials the agent fresh per
+request, selects the configured key, and returns a `Signer`. For RSA
+keys we force the `rsa-sha2-512` flag and verify the agent honored
+it — a misbehaving agent that tried to downgrade to SHA-1 would be
 rejected rather than returning a signature that modern verifiers
-won't accept.
+won't accept. This check applies to all key types.
 
 ## Security notes
 
@@ -366,14 +365,18 @@ front of `/sign` and `/publickey`.
 
 | Path | What |
 |---|---|
-| `cmd/ssh-agent-proxy/main.go` | Config loading, HTTP server, signal handling |
-| `cmd/ssh-agent-proxy/source_agent.go` | Generic `AgentSource` + `agentBackedSigner` |
-| `cmd/ssh-agent-proxy/source_agent_unix.go` | Unix socket dialer (linux / darwin / bsd) |
-| `cmd/ssh-agent-proxy/source_agent_windows.go` | Windows named-pipe dialer (go-winio) |
-| `cmd/ssh-agent-proxy/service_windows.go` | Windows service install/uninstall + `svc.Run` handler |
-| `cmd/ssh-agent-proxy/service_other.go` | No-op stubs for non-Windows |
-| `cmd/ssh-agent-proxy/hardening_{linux,darwin,windows,other}.go` | Per-platform process hardening |
-| `sshsig/` | Pure-Go SSHSIG wire format + OpenSSH armor |
+| `src/main.rs` | Config loading, HTTP server (axum), signal handling |
+| `src/agent.rs` | Minimal SSH agent protocol client (LIST + SIGN) |
+| `src/agent_source.rs` | `AgentSource` + `AgentBackedSigner` |
+| `src/sshsig.rs` | SSHSIG wire format + OpenSSH armor |
+| `src/wire.rs` | Shared SSH wire-format primitives |
+| `src/config.rs` | Environment variable configuration |
+| `src/server.rs` | axum HTTP handlers (`/sign`, `/publickey`, `/healthz`) |
+| `src/dialer_unix.rs` | Unix domain socket dialer |
+| `src/dialer_windows.rs` | Windows named-pipe dialer |
+| `src/hardening_{linux,macos,windows}.rs` | Per-platform process hardening |
+| `src/service_windows.rs` | Windows service install/uninstall + SCM dispatcher |
+| `src/service_stub.rs` | No-op service stubs for non-Windows |
 | `scripts/ssh-agent-proxy-sign.sh` | Container-side `gpg.ssh.program` shim |
 | `contrib/systemd/ssh-agent-proxy.service` | systemd **user** unit |
 | `contrib/systemd/env.example` | `EnvironmentFile=` template |
@@ -381,12 +384,10 @@ front of `/sign` and `/publickey`.
 ## Tests
 
 ```sh
-make check       # go vet + go test ./...
+make check       # cargo clippy + cargo test
 ```
 
-Twelve tests cover the HTTP handlers, the shim script end-to-end,
-live-ssh-agent integration for `AgentSource` (including pubkey
-selection and error paths), and the `sshsig` package's byte-equality
-claims against real `ssh-keygen`. Tests that shell out to
-`ssh-keygen`, `ssh-agent`, or `ssh-add` skip themselves when those
-binaries aren't installed, so the suite runs in minimal CI images.
+21 tests cover the SSH wire-format primitives, SSHSIG byte-equality
+against real `ssh-keygen` (Ed25519 and RSA), agent protocol parsing,
+key selection logic, and `check-novalidate` verification. Tests that
+shell out to `ssh-keygen` skip themselves when it's not installed.
