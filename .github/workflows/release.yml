@@ -87,7 +87,7 @@ jobs:
         shell: pwsh
         run: |
           $version = ($env:TAG -replace '^v', '')
-          wix build `
+          wix build -acceptEula wix7 `
               -arch x64 `
               -d "Version=$version" `
               -d "SourceExe=$env:GITHUB_WORKSPACE/target/$env:TARGET/release/ssh-agent-proxy.exe" `
