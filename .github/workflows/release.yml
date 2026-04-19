@@ -6,11 +6,13 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   build:
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
+    environment: ${{ matrix.environment }}
     strategy:
       fail-fast: false
       matrix:
@@ -18,12 +20,15 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             artifact: ssh-agent-proxy
+            environment: ''
           - target: aarch64-apple-darwin
             os: macos-latest
             artifact: ssh-agent-proxy
+            environment: ''
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             artifact: ssh-agent-proxy.exe
+            environment: signing
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -46,6 +51,17 @@ jobs:
 
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Sign (Windows)
+        if: runner.os == 'Windows'
+        uses: Azure/artifact-signing-action@b443cf8ea4124818d2ea9f043cba29fc3ec47b16 # v1.2.0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
+          files: target/${{ matrix.target }}/release/ssh-agent-proxy.exe
 
       - name: Package (Unix)
         if: runner.os != 'Windows'
