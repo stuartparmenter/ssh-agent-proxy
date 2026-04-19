@@ -60,7 +60,7 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           allow-no-subscriptions: true
 
-      - name: Sign (Windows)
+      - name: Sign exe (Windows)
         if: runner.os == 'Windows'
         uses: Azure/artifact-signing-action@b443cf8ea4124818d2ea9f043cba29fc3ec47b16 # v1.2.0
         with:
@@ -68,6 +68,40 @@ jobs:
           signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
           certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
           files: ${{ github.workspace }}/target/${{ matrix.target }}/release/ssh-agent-proxy.exe
+
+      - name: Setup .NET (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/setup-dotnet@c2fa09f4bde5ebb9d1777cf28262a3eb3db3ced7 # v5.2.0
+        with:
+          dotnet-version: '9.x'
+
+      - name: Install WiX (Windows)
+        if: runner.os == 'Windows'
+        run: dotnet tool install --global wix
+
+      - name: Build MSI (Windows)
+        if: runner.os == 'Windows'
+        env:
+          TARGET: ${{ matrix.target }}
+          TAG: ${{ github.event.release.tag_name }}
+        shell: pwsh
+        run: |
+          $version = ($env:TAG -replace '^v', '')
+          wix build `
+              -arch x64 `
+              -d "Version=$version" `
+              -d "SourceExe=$env:GITHUB_WORKSPACE/target/$env:TARGET/release/ssh-agent-proxy.exe" `
+              -o "ssh-agent-proxy-$env:TARGET.msi" `
+              wix/ssh-agent-proxy.wxs
+
+      - name: Sign MSI (Windows)
+        if: runner.os == 'Windows'
+        uses: Azure/artifact-signing-action@b443cf8ea4124818d2ea9f043cba29fc3ec47b16 # v1.2.0
+        with:
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ vars.AZURE_SIGNING_PROFILE }}
+          files: ${{ github.workspace }}/ssh-agent-proxy-${{ matrix.target }}.msi
 
       - name: Package (Unix)
         if: runner.os != 'Windows'
@@ -88,6 +122,7 @@ jobs:
           Compress-Archive -Path ssh-agent-proxy.exe -DestinationPath ../../../ssh-agent-proxy-$env:TARGET.zip
           cd ../../..
           (Get-FileHash -Algorithm SHA256 "ssh-agent-proxy-$env:TARGET.zip").Hash.ToLower() + "  ssh-agent-proxy-$env:TARGET.zip" | Out-File -Encoding ascii "ssh-agent-proxy-$env:TARGET.zip.sha256"
+          (Get-FileHash -Algorithm SHA256 "ssh-agent-proxy-$env:TARGET.msi").Hash.ToLower() + "  ssh-agent-proxy-$env:TARGET.msi" | Out-File -Encoding ascii "ssh-agent-proxy-$env:TARGET.msi.sha256"
 
       - name: Upload release assets
         env:

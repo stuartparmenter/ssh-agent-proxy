@@ -1,6 +1,6 @@
 use std::fs;
 
-const DEFAULT_ADDR: &str = "127.0.0.1:7221";
+pub const DEFAULT_PORT: u16 = 7221;
 const DEFAULT_NAMESPACE: &str = "git";
 
 pub struct Config {
@@ -12,7 +12,10 @@ pub struct Config {
 
 impl Config {
     pub fn from_env() -> Result<Self, String> {
-        let addr = env_or_default("SSH_AGENT_PROXY_ADDR", DEFAULT_ADDR);
+        let addr = std::env::var("SSH_AGENT_PROXY_ADDR")
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(default_addr);
         let namespace = env_or_default("SSH_AGENT_PROXY_NAMESPACE", DEFAULT_NAMESPACE);
 
         let agent_path = std::env::var("SSH_AGENT_PROXY_UPSTREAM")
@@ -101,4 +104,18 @@ fn default_agent_path() -> Option<String> {
 #[cfg(not(any(unix, windows)))]
 fn default_agent_path() -> Option<String> {
     None
+}
+
+// Default bind address. On Windows the tray persists a user preference
+// (loopback / all-interfaces / Tailscale) in HKCU; elsewhere we hard-code
+// loopback.
+#[cfg(windows)]
+fn default_addr() -> String {
+    use crate::bind_address_windows::{read_mode, resolve, tailscale_ip};
+    resolve(read_mode(), tailscale_ip())
+}
+
+#[cfg(not(windows))]
+fn default_addr() -> String {
+    format!("127.0.0.1:{DEFAULT_PORT}")
 }

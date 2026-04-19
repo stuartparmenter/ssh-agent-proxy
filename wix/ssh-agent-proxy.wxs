@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  WiX v4+ installer definition for ssh-agent-proxy.
+
+  Usage (from repo root, after building the signed exe):
+
+    wix build -arch x64 \
+        -d Version=1.2.3 \
+        -d SourceExe=target/x86_64-pc-windows-msvc/release/ssh-agent-proxy.exe \
+        -o ssh-agent-proxy.msi \
+        wix/ssh-agent-proxy.wxs
+
+  The exe should already be Authenticode-signed by the time `wix build`
+  embeds it; the MSI itself is signed as a separate final step.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+      Name="SSH Agent Proxy"
+      Manufacturer="ssh-agent-proxy"
+      Version="$(var.Version)"
+      UpgradeCode="ab31bbff-d246-48a1-aff5-f2ed5efd837f"
+      Compressed="yes"
+      Scope="perMachine">
+
+    <SummaryInformation Description="SSH Agent Signing Proxy" />
+
+    <MajorUpgrade
+        DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="AppIcon.ico" SourceFile="assets/icon.ico" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/stuartparmenter/ssh-agent-proxy" />
+
+    <Feature Id="Main" Title="SSH Agent Proxy" Level="1">
+      <ComponentRef Id="MainExecutable" />
+      <ComponentRef Id="StartupShortcut" />
+    </Feature>
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLDIR" Name="ssh-agent-proxy">
+        <Component Id="MainExecutable" Bitness="always64">
+          <File Id="MainExeFile"
+                Source="$(var.SourceExe)"
+                Name="ssh-agent-proxy.exe"
+                KeyPath="yes">
+            <Shortcut Id="StartMenuShortcut"
+                      Directory="ProgramMenuFolder"
+                      Name="SSH Agent Proxy"
+                      Description="SSH agent signing proxy"
+                      WorkingDirectory="INSTALLDIR"
+                      Advertise="no" />
+          </File>
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <!--
+      Per-user "has been installed" marker so the StartupShortcut component
+      has a keypath. Its purpose is to carry the Start Menu shortcut; the
+      Run-key toggle for "Start at login" is owned by the tray app at
+      runtime, not by the installer.
+    -->
+    <Component Id="StartupShortcut" Directory="INSTALLDIR" Bitness="always64">
+      <RegistryValue
+          Root="HKCU"
+          Key="Software\ssh-agent-proxy"
+          Name="installed"
+          Type="integer"
+          Value="1"
+          KeyPath="yes" />
+    </Component>
+
+    <!--
+      Launch the tray app at the end of a fresh install, impersonated so it
+      runs in the invoking user's session (required to reach per-user
+      ssh-agent pipes like 1Password Desktop's).
+    -->
+    <CustomAction Id="LaunchApp"
+                  FileRef="MainExeFile"
+                  ExeCommand=""
+                  Return="asyncNoWait"
+                  Impersonate="yes" />
+
+    <InstallExecuteSequence>
+      <Custom Action="LaunchApp" After="InstallFinalize"
+              Condition="NOT Installed AND NOT REMOVE" />
+    </InstallExecuteSequence>
+
+  </Package>
+</Wix>

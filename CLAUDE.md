@@ -26,7 +26,10 @@ make build-windows             # cross-compile (needs mingw)
 - `src/wire.rs` — shared SSH string read/write primitives
 - `src/dialer_{unix,windows}.rs` — platform-specific agent connection
 - `src/hardening_{linux,macos,windows}.rs` — process hardening (prctl, mlockall, etc.)
-- `src/service_windows.rs` — Windows SCM integration (install/uninstall/dispatcher)
+- `src/tray_windows.rs` — Windows tray icon + menu + message loop
+- `src/autostart_windows.rs` — HKCU Run-key management
+- `build.rs` + `assets/icon.{ico,rc}` — embeds the Win32 icon resource
+- `wix/ssh-agent-proxy.wxs` — MSI installer definition (WiX v4+)
 
 ## Key design decisions
 
@@ -35,7 +38,9 @@ make build-windows             # cross-compile (needs mingw)
 - Signature format anti-downgrade check on ALL key types, not just RSA
 - `DefaultBodyLimit` enforced at the axum layer, not just in-handler
 - Platform code uses `#[cfg(target_os)]` / `#[cfg(unix)]` / `#[cfg(windows)]`
-- Windows service module is in main.rs module tree (not lib.rs) because it calls `crate::run()`
+- Windows is a GUI-subsystem binary (`windows_subsystem = "windows"`); `--console` attaches to the parent console for debugging
+- Default Windows run mode is a tray app — tokio runtime runs on a worker thread so the main thread can pump Win32 messages
+- `run()` takes an `Arc<Notify>` so the tray's Exit menu can trigger graceful shutdown alongside the existing ctrl_c/SIGTERM paths
 
 ## Testing
 
