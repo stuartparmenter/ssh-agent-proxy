@@ -176,40 +176,33 @@ To remove:
 make uninstall-systemd     # preserves ~/.config/ssh-agent-proxy/env
 ```
 
-## Run as a Windows service
+## Run on Windows
 
-```powershell
-# In PowerShell, as Administrator
-# Set whichever env vars you want baked into the service
-$env:SSH_AGENT_PROXY_UPSTREAM = "\\.\pipe\openssh-ssh-agent"
-$env:SSH_AGENT_PROXY_PUBKEY_FILE = "$env:USERPROFILE\.ssh\git_signing.pub"
+Install the MSI from the latest release. The installer drops the
+signed binary in `%ProgramFiles%\ssh-agent-proxy\` and adds a Start
+Menu shortcut.
 
-# Install (runs as the current user by default — required to reach
-# per-user agent pipes like 1Password Desktop's)
-.\ssh-agent-proxy.exe install
+The binary is a tray app. Double-click it (or let it auto-start after
+install) and a tray icon appears. Right-click gives you:
 
-# It will prompt for your Windows password so the SCM can launch the
-# service as your account. Pass --password on the command line instead
-# if you're automating.
+- **Start at login** (checked by default) — toggles an
+  `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` entry so the
+  proxy launches in your user session at logon.
+- **Exit** — shuts the HTTP server down and quits.
 
-sc start ssh-agent-proxy
-```
+Configuration is via environment variables, same as Linux/macOS. Set
+them in your user environment (System Properties → Environment
+Variables → User variables) before the proxy starts:
 
-Flags on `install`:
+- `SSH_AGENT_PROXY_ADDR` (default `127.0.0.1:7221`)
+- `SSH_AGENT_PROXY_UPSTREAM` (e.g. `\\.\pipe\openssh-ssh-agent`)
+- `SSH_AGENT_PROXY_PUBKEY_FILE` (e.g. `%USERPROFILE%\.ssh\git_signing.pub`)
+- `SSH_AGENT_PROXY_NAMESPACE` (default `git`)
 
-- `--user DOMAIN\user` — override the run-as user (default: current
-  user from `USERDOMAIN\USERNAME`)
-- `--password PASS` — password for `--user`; prompted on stdin if
-  omitted
-- `--system` — install as `LocalSystem` instead. Only works if the
-  upstream agent's named pipe is accessible to SYSTEM (1Password
-  Desktop's pipe typically is **not**, because it lives in the user
-  session).
+Logs go to `%LOCALAPPDATA%\ssh-agent-proxy\tray.log`.
 
-The service logs to `%LOCALAPPDATA%\ssh-agent-proxy\service.log`
-(per-user, ACLed to the run-as account).
-
-Uninstall with `.\ssh-agent-proxy.exe uninstall`.
+For debugging, run `ssh-agent-proxy.exe --console` from a terminal;
+log output appears on stderr and the tray icon is suppressed.
 
 ## Use it from a container
 
@@ -343,14 +336,13 @@ won't accept. This check applies to all key types.
 - On Linux/macOS, `~/.config/ssh-agent-proxy/env` should be 0600 and
   under `ProtectHome=read-only` in the systemd unit. Don't check it
   into dotfiles git.
-- On Windows, the install subcommand persists env vars into the
-  service's `HKLM\SYSTEM\CurrentControlSet\Services\ssh-agent-proxy\Environment`
-  REG_MULTI_SZ. The registry key is ACLed the same way the rest of
-  the service's config is — only Administrators and SYSTEM can
-  rewrite it.
-- Service logs land in `%LOCALAPPDATA%\ssh-agent-proxy\service.log`
-  rather than `%ProgramData%`, which keeps them out of the
-  world-readable default.
+- On Windows, configure the proxy via per-user environment variables
+  (System Properties → Environment Variables → User variables). The
+  tray app inherits them at launch. Machine-wide environment
+  variables work too but expose the config to every account on the
+  host.
+- Tray logs land in `%LOCALAPPDATA%\ssh-agent-proxy\tray.log`, which
+  keeps them out of the world-readable `%ProgramData%`.
 
 ### HTTP authentication
 
@@ -375,8 +367,10 @@ front of `/sign` and `/publickey`.
 | `src/dialer_unix.rs` | Unix domain socket dialer |
 | `src/dialer_windows.rs` | Windows named-pipe dialer |
 | `src/hardening_{linux,macos,windows}.rs` | Per-platform process hardening |
-| `src/service_windows.rs` | Windows service install/uninstall + SCM dispatcher |
-| `src/service_stub.rs` | No-op service stubs for non-Windows |
+| `src/tray_windows.rs` | Windows tray icon + menu + message loop |
+| `src/autostart_windows.rs` | HKCU Run-key management for "Start at login" |
+| `wix/ssh-agent-proxy.wxs` | WiX v4+ installer definition |
+| `assets/icon.ico` | Windows application icon (embedded via `build.rs`) |
 | `scripts/ssh-agent-proxy-sign.sh` | Container-side `gpg.ssh.program` shim |
 | `contrib/systemd/ssh-agent-proxy.service` | systemd **user** unit |
 | `contrib/systemd/env.example` | `EnvironmentFile=` template |

@@ -1,3 +1,5 @@
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 mod agent;
 mod agent_source;
 mod config;
@@ -18,14 +20,17 @@ mod hardening_macos;
 mod hardening_windows;
 
 #[cfg(windows)]
-mod service_windows;
-#[cfg(not(windows))]
-#[path = "service_stub.rs"]
-mod service_windows;
+mod autostart_windows;
+#[cfg(windows)]
+mod tray_windows;
 
 use std::sync::Arc;
+use tokio::sync::Notify;
 
-fn harden_process() {
+#[cfg(windows)]
+pub(crate) const APP_SLUG: &str = "ssh-agent-proxy";
+
+pub(crate) fn harden_process() {
     #[cfg(target_os = "linux")]
     hardening_linux::harden();
     #[cfg(target_os = "macos")]
@@ -34,40 +39,44 @@ fn harden_process() {
     hardening_windows::harden();
 }
 
-#[tokio::main]
-async fn main() {
-    // Service subcommands (Windows only: install / uninstall).
-    let args: Vec<String> = std::env::args().collect();
-    if args.len() > 1 {
-        match args[1].as_str() {
-            "install" | "uninstall" => {
-                if let Err(e) = service_windows::run_service_cmd(&args[1], &args[2..]) {
-                    eprintln!("{}: {e}", args[1]);
-                    std::process::exit(1);
-                }
-                return;
-            }
-            _ => {}
+fn main() {
+    #[cfg(windows)]
+    {
+        let console_mode = std::env::args().any(|a| a == "--console");
+        if console_mode {
+            attach_parent_console();
+            env_logger::init();
+            harden_process();
+            run_blocking();
+        } else if let Err(e) = tray_windows::run_tray() {
+            log::error!("tray: {e}");
+            std::process::exit(1);
         }
     }
 
-    // When launched by the Windows SCM, delegate to the service dispatcher
-    // (which sets up its own logging and tokio runtime).
-    if service_windows::is_windows_service() {
-        service_windows::run_as_windows_service();
-        return;
+    #[cfg(not(windows))]
+    {
+        env_logger::init();
+        harden_process();
+        run_blocking();
     }
+}
 
-    env_logger::init();
-    harden_process();
-
-    if let Err(e) = run().await {
+fn run_blocking() {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("failed to build tokio runtime");
+    let shutdown = Arc::new(Notify::new());
+    if let Err(e) = rt.block_on(run(shutdown)) {
         log::error!("ssh-agent-proxy: {e}");
         std::process::exit(1);
     }
 }
 
-async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+pub(crate) async fn run(
+    shutdown: Arc<Notify>,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let cfg = config::Config::from_env()
         .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { e.into() })?;
 
@@ -105,13 +114,13 @@ async fn run() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     log::info!("listening on {} (namespace {:?})", cfg.addr, cfg.namespace);
 
     axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
+        .with_graceful_shutdown(shutdown_signal(shutdown))
         .await?;
 
     Ok(())
 }
 
-async fn shutdown_signal() {
+async fn shutdown_signal(tray: Arc<Notify>) {
     let ctrl_c = tokio::signal::ctrl_c();
 
     #[cfg(unix)]
@@ -121,12 +130,32 @@ async fn shutdown_signal() {
         tokio::select! {
             _ = ctrl_c => { log::info!("received SIGINT, shutting down"); }
             _ = sigterm.recv() => { log::info!("received SIGTERM, shutting down"); }
+            _ = tray.notified() => { log::info!("tray exit, shutting down"); }
         }
     }
 
     #[cfg(not(unix))]
     {
-        ctrl_c.await.expect("failed to install CTRL+C handler");
-        log::info!("received shutdown signal");
+        tokio::select! {
+            result = ctrl_c => {
+                result.expect("failed to install CTRL+C handler");
+                log::info!("received shutdown signal");
+            }
+            _ = tray.notified() => { log::info!("tray exit, shutting down"); }
+        }
+    }
+}
+
+/// Reattach a GUI-subsystem process to its parent console so `println!` /
+/// `eprintln!` show up in the terminal the user launched us from. Silently
+/// no-ops if there is no parent console (e.g. launched from Explorer).
+#[cfg(windows)]
+fn attach_parent_console() {
+    use windows_sys::Win32::System::Console::{ATTACH_PARENT_PROCESS, AttachConsole};
+    // Rust's stdout/stderr call `GetStdHandle` lazily per write, so we don't
+    // need to reopen CONOUT$ — once the console is attached, subsequent prints
+    // pick up the fresh handles automatically.
+    unsafe {
+        let _ = AttachConsole(ATTACH_PARENT_PROCESS);
     }
 }
