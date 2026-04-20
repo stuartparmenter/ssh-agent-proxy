@@ -19,20 +19,29 @@ jobs:
 
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
-      - name: Update version in Cargo.toml
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # stable
+        with:
+          toolchain: stable
+
+      - name: Install cargo-edit
+        uses: taiki-e/install-action@055f5df8c3f65ea01cd41e9dc855becd88953486 # v2.75.18
+        with:
+          tool: cargo-edit
+
+      - name: Bump version
         env:
           VERSION: ${{ steps.drafter.outputs.resolved_version }}
-        run: |
-          sed -i "s/^version = .*/version = \"${VERSION}\"/" Cargo.toml
+        run: cargo set-version "$VERSION"
 
       - name: Commit changes
         env:
           VERSION: ${{ steps.drafter.outputs.resolved_version }}
         run: |
-          if ! git diff --quiet Cargo.toml; then
+          if ! git diff --quiet Cargo.toml Cargo.lock; then
             git config --global user.name "github-actions[bot]"
             git config --global user.email "github-actions[bot]@users.noreply.github.com"
-            git add Cargo.toml
+            git add Cargo.toml Cargo.lock
             git commit -m "Bump version to ${VERSION} [skip ci]"
             git push
           fi
