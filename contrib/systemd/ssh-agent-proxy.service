@@ -1,6 +1,6 @@
 [Unit]
 Description=ssh-agent-proxy: localhost SSH git-signing proxy (ssh-agent backend)
-Documentation=https://github.com/stuartparmenter/ssh-agent-proxy
+Documentation=https://github.com/pavlov-net/ssh-agent-proxy
 After=default.target
 
 [Service]

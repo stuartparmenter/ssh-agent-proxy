@@ -31,7 +31,7 @@
 
     <Icon Id="AppIcon.ico" SourceFile="assets/icon.ico" />
     <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
-    <Property Id="ARPURLINFOABOUT" Value="https://github.com/stuartparmenter/ssh-agent-proxy" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/pavlov-net/ssh-agent-proxy" />
 
     <Feature Id="Main" Title="SSH Agent Proxy" Level="1">
       <ComponentRef Id="MainExecutable" />
