@@ -2751,7 +2751,6 @@ dependencies = [
  "reqwest",
  "rsa",
  "sha2 0.11.0",
- "signature",
  "ssh-key",
  "tempfile",
  "thiserror 2.0.18",

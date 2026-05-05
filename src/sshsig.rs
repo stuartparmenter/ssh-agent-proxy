@@ -275,8 +275,8 @@ mod tests {
     // -----------------------------------------------------------------------
 
     use ed25519_dalek::Signer as DalekSigner;
+    use rsa::signature::SignatureEncoding;
     use rsa::traits::PublicKeyParts;
-    use signature::SignatureEncoding;
 
     /// Check whether ssh-keygen is available; return its path or None.
     fn find_ssh_keygen() -> Option<String> {
@@ -484,7 +484,7 @@ mod tests {
             &self,
             data: &[u8],
         ) -> Result<SshSignature, Box<dyn std::error::Error + Send + Sync>> {
-            use signature::Signer as _;
+            use rsa::signature::Signer as _;
             let sig = self.signing_key.sign(data);
             Ok(SshSignature {
                 format: "rsa-sha2-512".to_string(),

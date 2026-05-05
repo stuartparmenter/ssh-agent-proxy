@@ -42,4 +42,3 @@ ed25519-dalek = { version = "2", features = ["rand_core"] }
 rsa = "0.9"
 ssh-key = { version = "0.6", features = ["ed25519", "rsa", "std"] }
 rand_core = { version = "0.6", features = ["getrandom"] }
-signature = "2"
