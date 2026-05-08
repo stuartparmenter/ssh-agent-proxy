@@ -30,7 +30,7 @@ windows-sys = { version = "0.61", features = [
     "Win32_NetworkManagement_IpHelper",
     "Win32_Networking_WinSock",
 ] }
-tray-icon = { version = "0.23", default-features = false }
+tray-icon = { version = "0.24", default-features = false }
 
 [target.'cfg(windows)'.build-dependencies]
 embed-resource = "3"
